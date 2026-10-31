@@ -62,4 +62,32 @@ $('files').addEventListener('click',prepareAudio);
 $('files').onchange=async e=>{const files=[...e.target.files];let ok=0;for(const file of files){try{const result=await QrScanner.scanImage(file,{returnDetailedScanResult:true});if(addCode(items,result.data)){ok++;beep();}}catch{}}render();toast(`Đã đọc ${ok}/${files.length} ảnh.${ok<files.length?' Ảnh còn lại không tìm thấy mã QR.':''}`);e.target.value='';};
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText(formatCodes(items));toast('Đã sao chép kết quả!');}catch{$('output').focus();$('output').select();if(document.execCommand('copy'))toast('Đã sao chép kết quả!');else toast('Hãy nhấn giữ kết quả hoặc Ctrl+C để sao chép.');}};
 $('clear').onclick=()=>{if(confirm('Xóa toàn bộ danh sách sản phẩm?')){items.clear();gate.code=null;render();toast('Đã xóa danh sách');}};
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&running)stop();});window.addEventListener('pagehide',()=>scanner?.destroy());render();
+// Preserve the user's camera intent when Safari suspends offscreen video.
+let recovering=false,lastRecovery=0;
+async function resumeCamera(){
+  if(!running||busy||recovering||document.hidden)return;
+  const video=$('video'),rect=video.getBoundingClientRect();
+  if(rect.bottom<=0||rect.top>=window.innerHeight)return;
+  const track=video.srcObject?.getVideoTracks()[0];
+  if(!video.paused&&track?.readyState==='live'&&!track.muted)return;
+  if(Date.now()-lastRecovery<1500)return;
+  recovering=true;lastRecovery=Date.now();
+  try{
+    if(track?.readyState==='live'&&!track.muted){await video.play();await scanner.start();}
+    else {await scanner.pause(true);await scanner.start();}
+    if(!running||document.hidden){scanner.stop();return;}
+    void focusCamera();$('state').textContent='● Đang quét';
+  }catch{if(running)$('state').textContent='Chạm vùng camera để tiếp tục';}
+  finally{recovering=false;}
+}
+const cameraObserver=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))void resumeCamera();});
+cameraObserver.observe($('video'));
+$('video').addEventListener('pause',()=>{setTimeout(resumeCamera,250);});
+document.querySelector('.viewport').addEventListener('click',resumeCamera);
+window.addEventListener('scroll',resumeCamera,{passive:true});
+window.addEventListener('focus',resumeCamera);
+window.addEventListener('pageshow',resumeCamera);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void resumeCamera();});
+window.addEventListener('pagehide',()=>{scanner?.pause(true);});
+setInterval(resumeCamera,2000);
+render();
